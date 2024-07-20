@@ -9,6 +9,27 @@ use petgraph::{
 use wasm_bindgen::prelude::*;
 use web_sys::js_sys::{Int32Array, Uint32Array};
 
+// Define MyVertexData and implement required traits
+#[wasm_bindgen]
+#[derive(Debug, Clone)]
+pub struct MyVertexData {
+    name: String,
+    value: i32,
+}
+
+#[wasm_bindgen]
+impl MyVertexData {
+    #[wasm_bindgen(getter)]
+    pub fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn value(&self) -> i32 {
+        self.value
+    }
+}
+
 #[wasm_bindgen]
 pub enum GraphMode {
     Directed,
@@ -18,21 +39,19 @@ pub enum GraphMode {
 #[wasm_bindgen]
 pub struct GraphWrapper {
     mode: GraphMode,
-    graph: Graph<(), u32, Directed, u32>,
+    graph: Graph<MyVertexData, u32, Directed, u32>,
 }
 
 impl GraphWrapper {
     pub fn _all_vertices(&self) -> NodeIndices {
-        return self.graph.node_indices();
+        self.graph.node_indices()
     }
 
     pub fn _neighbors(&self, node_index: NodeIndex<u32>) -> Neighbors<'_, u32> {
-        let node_indexes = match self.mode {
+        match self.mode {
             GraphMode::Undirected => self.graph.neighbors_undirected(node_index),
             GraphMode::Directed => self.graph.neighbors_directed(node_index, Outgoing),
-        };
-
-        return node_indexes;
+        }
     }
 
     pub fn _total_connection_weight(
@@ -59,7 +78,7 @@ impl GraphWrapper {
             return None;
         }
 
-        return Some(sum);
+        Some(sum)
     }
 }
 
@@ -67,10 +86,10 @@ impl GraphWrapper {
 impl GraphWrapper {
     #[wasm_bindgen(constructor)]
     pub fn new() -> GraphWrapper {
-        let graph = Graph::<(), u32, Directed, u32>::new();
+        let graph = Graph::<MyVertexData, u32, Directed, u32>::new();
 
         GraphWrapper {
-            graph: graph,
+            graph,
             mode: GraphMode::Undirected,
         }
     }
@@ -79,23 +98,27 @@ impl GraphWrapper {
         let mut text = String::new();
 
         for node in self.graph.node_indices() {
-            text.push_str(&format!("{}\n", node.index()));
+            let node_data = self.graph.node_weight(node).unwrap();
+            text.push_str(&format!("Node {}: {:?}\n", node.index(), node_data));
         }
 
         for edge in self.graph.edge_indices() {
             let (source, destination) = self.graph.edge_endpoints(edge).unwrap();
-            text.push_str(&format!("{} {}\n", source.index(), destination.index()));
+            text.push_str(&format!("Edge {} -> {}\n", source.index(), destination.index()));
         }
 
-        return text;
+        text
     }
 
     pub fn len(&self) -> u32 {
         self.graph.node_count() as u32
     }
 
-    pub fn create_vertex(&mut self) -> usize {
-        self.graph.add_node(()).index()
+    // Return MyVertexData instead of usize
+    pub fn create_vertex(&mut self, name: String, value: i32) -> MyVertexData {
+        let new_node = MyVertexData { name, value };
+        self.graph.add_node(new_node.clone());
+        new_node
     }
 
     pub fn neighbors(&self, node_id: usize) -> Uint32Array {
@@ -106,7 +129,7 @@ impl GraphWrapper {
             .map(|node| node.index() as u32)
             .collect();
 
-        return Uint32Array::from(&node_indexes[..]);
+        Uint32Array::from(&node_indexes[..])
     }
 
     pub fn delete_vertex(&mut self, node_id: usize) {
@@ -140,14 +163,16 @@ impl GraphWrapper {
         let all_edges: Vec<u32> = first_to_second.chain(second_to_first).collect();
 
         if all_edges.len() > 1 {
-            return Err(format!("An error was logged because there exists more than one edge between {first_node_id} and {second_node_id}"));
+            return Err(format!(
+                "An error was logged because there exists more than one edge between {first_node_id} and {second_node_id}"
+            ));
         }
 
-        if all_edges.len() == 0 {
+        if all_edges.is_empty() {
             return Ok(None);
         }
 
-        return Ok(Some(all_edges[0]));
+        Ok(Some(all_edges[0]))
     }
 
     pub fn edge_directed(
@@ -165,17 +190,19 @@ impl GraphWrapper {
             .collect();
 
         if edges.len() > 1 {
-            return Err(format!("An error was logged because there exists more than one edge between {first_node_id} and {second_node_id}"));
+            return Err(format!(
+                "An error was logged because there exists more than one edge between {first_node_id} and {second_node_id}"
+            ));
         }
 
-        if edges.len() == 0 {
+        if edges.is_empty() {
             return Ok(None);
         }
 
-        return Ok(Some(edges[0]));
+        Ok(Some(edges[0]))
     }
 
-    pub fn adjacent_egdes(&self, node_id: usize) -> Int32Array {
+    pub fn adjacent_edges(&self, node_id: usize) -> Int32Array {
         let node_index = NodeIndex::<u32>::new(node_id);
 
         let outgoing_edges = self
@@ -208,6 +235,6 @@ impl GraphWrapper {
             weight.unwrap_or(1),
         );
 
-        return Ok(new_edge.index());
+        Ok(new_edge.index())
     }
 }
