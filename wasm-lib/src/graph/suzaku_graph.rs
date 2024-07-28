@@ -1,14 +1,15 @@
 use std::collections::HashMap;
 use std::fmt;
 use wasm_bindgen::prelude::*;
+use serde::{Serialize, Deserialize};
 //use web_sys::js_sys::{Int32Array, Uint32Array};
 
 
-use hypergraph::{Hypergraph}; //HyperedgeIndex, VertexIndex
+use hypergraph::{Hypergraph, VertexIndex}; //HyperedgeIndex, VertexIndex
 use std::fmt::{Display, Formatter};
 
 #[wasm_bindgen]
-#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Person {
     id: usize,
 }
@@ -68,7 +69,7 @@ impl Display for Relation {
 
 
 #[wasm_bindgen]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersonRecord {
     name: String,
     value: i32,
@@ -88,7 +89,7 @@ impl PersonRecord {
 }
 
 #[wasm_bindgen]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VertexWithRecord {
     new_node: Person,
     record: PersonRecord,
@@ -140,25 +141,61 @@ impl GraphWrapper {
     }
 
     // Create a vertex
-    pub fn create_vertex(&mut self, name: String, value: i32) -> VertexWithRecord {
-        let id = self.next_person_id;
-        self.next_person_id += 1;
-        let new_node = Person { id };
-        self.graph.add_vertex(new_node);
-        self.people.insert(id, (name.clone().into(), value));
+    #[wasm_bindgen]
+    pub fn create_vertex(&mut self, name: String, value: i32) -> Result<JsValue, JsValue> {
+        // Create a new Person with a placeholder ID (it will be replaced)
+        let temp_person = Person { id: 0 };
 
-        let record_tuple = self.people.get(&id).unwrap().clone();
-        let record = PersonRecord {
-            name: record_tuple.0.into(),
-            value: record_tuple.1,
-        };
+        // Add the vertex using the hypergraph crate method and get the assigned ID
+        match self.graph.add_vertex(temp_person) {
+            Ok(vertex_index) => {
+                // Extract the ID from VertexIndex
+                let id: usize = vertex_index.0;
+                let new_node = Person { id };
 
+                // Insert the record into the people map
+                self.people.insert(id, (name.clone(), value));
 
-        VertexWithRecord {
-            new_node,
-            record,
+                // Retrieve and clone the record tuple
+                let record_tuple = self.people.get(&id).unwrap().clone();
+                let record = PersonRecord {
+                    name: record_tuple.0.clone(),
+                    value: record_tuple.1,
+                };
+
+                // Serialize the VertexWithRecord to JsValue
+                let result = VertexWithRecord {
+                    new_node,
+                    record,
+                };
+
+                serde_wasm_bindgen::to_value(&result).map_err(|e| JsValue::from_str(&e.to_string()))
+            }
+            Err(e) => Err(JsValue::from_str(&e.to_string())),
         }
     }
+
+
+
+    #[wasm_bindgen]
+    pub fn get_vertex_weight(&self, vertex_index: u32) -> Result<JsValue, JsValue> {
+        let vertex_index = VertexIndex(vertex_index as usize);
+
+        match self.graph.get_vertex_weight(vertex_index) {
+            Ok(person) => {
+                let record = self.people.get(&person.id).ok_or_else(|| JsValue::from_str("Record not found"))?;
+                let person_record = PersonRecord {
+                    name: record.0.clone(),
+                    value: record.1,
+                };
+                serde_wasm_bindgen::to_value(&person_record).map_err(|e| JsValue::from_str(&e.to_string()))
+            }
+            Err(e) => Err(JsValue::from_str(&e.to_string())),
+        }
+    }
+
+
+
 
     // pub fn to_string(&self) -> String {
     //     let mut text = String::new();
