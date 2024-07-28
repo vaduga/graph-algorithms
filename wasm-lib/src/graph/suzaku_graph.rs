@@ -113,9 +113,7 @@ impl VertexWithRecord {
 pub struct GraphWrapper {
     graph: Hypergraph<Person, Relation>,
     people: HashMap<usize, (String, i32)>,
-    relations: HashMap<usize, (String, usize)>,
-    next_person_id: usize,
-    next_relation_id: usize,
+    relations: HashMap<usize, (String, usize)>
 }
 
 impl GraphWrapper {
@@ -135,8 +133,6 @@ impl GraphWrapper {
             graph,
             people: HashMap::new(),
             relations: HashMap::new(),
-            next_person_id: 0,
-            next_relation_id: 0,
         }
     }
 
