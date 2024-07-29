@@ -71,7 +71,7 @@ impl Display for Relation {
 #[wasm_bindgen]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersonRecord {
-    name: String,
+    loc_name: String,
     value: i32,
 }
 
@@ -79,7 +79,7 @@ pub struct PersonRecord {
 impl PersonRecord {
     #[wasm_bindgen(getter)]
     pub fn name(&self) -> String {
-        self.name.clone()
+        self.loc_name.clone()
     }
 
     #[wasm_bindgen(getter)]
@@ -138,9 +138,9 @@ impl GraphWrapper {
 
     // Create a vertex
     #[wasm_bindgen]
-    pub fn create_vertex(&mut self, name: String, value: i32) -> Result<JsValue, JsValue> {
+    pub fn create_vertex(&mut self, id: usize, name: String, value: i32) -> Result<JsValue, JsValue> {
         // Create a new Person with a placeholder ID (it will be replaced)
-        let temp_person = Person { id: 0 };
+        let temp_person = Person { id };
 
         // Add the vertex using the hypergraph crate method and get the assigned ID
         match self.graph.add_vertex(temp_person) {
@@ -155,7 +155,7 @@ impl GraphWrapper {
                 // Retrieve and clone the record tuple
                 let record_tuple = self.people.get(&id).unwrap().clone();
                 let record = PersonRecord {
-                    name: record_tuple.0.clone(),
+                    loc_name: record_tuple.0.clone(),
                     value: record_tuple.1,
                 };
 
@@ -172,6 +172,11 @@ impl GraphWrapper {
     }
 
 
+    pub fn graphClear(&mut self) {
+        self.graph.clear();
+    }
+
+
 
     #[wasm_bindgen]
     pub fn get_vertex_weight(&self, vertex_index: u32) -> Result<JsValue, JsValue> {
@@ -181,7 +186,7 @@ impl GraphWrapper {
             Ok(person) => {
                 let record = self.people.get(&person.id).ok_or_else(|| JsValue::from_str("Record not found"))?;
                 let person_record = PersonRecord {
-                    name: record.0.clone(),
+                    loc_name: record.0.clone(),
                     value: record.1,
                 };
                 serde_wasm_bindgen::to_value(&person_record).map_err(|e| JsValue::from_str(&e.to_string()))
