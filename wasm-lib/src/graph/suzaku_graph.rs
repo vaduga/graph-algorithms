@@ -10,7 +10,7 @@ use std::fmt::{Display, Formatter};
 use std::cmp::PartialEq;
 use std::hash::{Hash, Hasher};
 use hypergraph::errors::HypergraphError;
-use js_sys::Float64Array;
+use js_sys::{Array, Float64Array};
 
 // Function to convert a Float64Array to Coords
 fn js_array_to_coords(array: &Float64Array) -> Coords {
@@ -159,13 +159,28 @@ pub struct GraphWrapper {
     relations: HashMap<usize, (String, usize)>
 }
 
+// Internal function to load vertex coordinates
 impl GraphWrapper {
-    // Method to return all vertices
-    pub fn _all_vertices(&self) -> Vec<String> {
-        self.people.values().map(|(name, _)| name.clone()).collect()
-    }
+    pub fn load_places(&self) -> Vec<Vec<f64>> {
+        let count = self.graph.count_vertices();
+        let mut coords = Vec::with_capacity(count);
 
+        for i in 0..count {
+            let vertex_index = VertexIndex(i);
+            match self.graph.get_vertex_weight(vertex_index) {
+                Ok(node) => {
+                    coords.push(vec![node.coords.lon, node.coords.lat]);
+                },
+                Err(_) => {
+                    coords.push(vec![]); // Handle vertex retrieval failure gracefully
+                }
+            }
+        }
+
+        coords
+    }
 }
+
 
 #[wasm_bindgen]
 impl GraphWrapper {
@@ -211,6 +226,27 @@ impl GraphWrapper {
             Err(e) => Err(JsValue::from_str(&format!("Error retrieving vertex: {:?}", e))),
         }
     }
+
+    #[wasm_bindgen]
+    pub fn get_all_vertex_coords(&self) -> JsValue {
+        // Call the internal function to get the coordinates
+        let coords_vec = self.load_places();
+
+        // Convert Vec<Vec<f64>> to js_sys::Array
+        let js_array = Array::new();
+        for coords in coords_vec {
+            let inner_array = Array::new();
+            for value in coords {
+                inner_array.push(&JsValue::from_f64(value));
+            }
+            js_array.push(&inner_array.into());
+        }
+
+        // Return the JavaScript array
+        js_array.into()
+    }
+
+
 
     #[wasm_bindgen]
     pub fn graph_clear(&mut self) -> Result<(), JsValue> {
