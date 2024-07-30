@@ -65,7 +65,7 @@ impl Hash for Coords {
 pub struct Node {
     id: usize,
     coords: Coords,
-    pub thr_id: i32,
+    pub thr_id: Option<i32>,  // Use Option<i32> to handle undefined values
 }
 
 // Implement PartialEq for Node
@@ -87,15 +87,25 @@ impl Hash for Node {
     }
 }
 
-impl Display for Node {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "Node {} {:?} {}", self.id, self.coords, self.thr_id)
+impl fmt::Display for Node {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Handle the Option<i32> with proper formatting
+        write!(
+            f,
+            "Node {} {:?} {}",
+            self.id,
+            self.coords,
+            match self.thr_id {
+                Some(id) => id.to_string(),
+                None => "No threshold ID".to_string(),
+            }
+        )
     }
 }
 
 #[wasm_bindgen]
 impl Node {
-    pub fn new(id: usize, coords: Coords, thr_id: i32) -> Node {
+    pub fn new(id: usize, coords: Coords, thr_id: Option<i32>) -> Node {
         Node { id, coords, thr_id }
     }
 
@@ -171,7 +181,7 @@ impl GraphWrapper {
 
     // Create a vertex
     #[wasm_bindgen]
-    pub fn create_vertex(&mut self, id: usize, coords_array: Float64Array, thr_id: i32) -> Result<u32, JsValue> {
+    pub fn create_vertex(&mut self, id: usize, coords_array: Float64Array, thr_id: Option<i32>) -> Result<u32, JsValue> {
         // Convert Float64Array to Coords
         let coords = js_array_to_coords(&coords_array);
 
