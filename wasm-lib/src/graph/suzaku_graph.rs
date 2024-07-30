@@ -11,6 +11,7 @@ use std::cmp::PartialEq;
 use std::hash::{Hash, Hasher};
 use hypergraph::errors::HypergraphError;
 use js_sys::{Array, Float64Array};
+use supercluster_rs::{Supercluster, SuperclusterBuilder};
 
 // Function to convert a Float64Array to Coords
 fn js_array_to_coords(array: &Float64Array) -> Coords {
@@ -179,6 +180,18 @@ impl GraphWrapper {
 
         coords
     }
+
+    pub fn create_cluster(&self) -> Supercluster {
+        let coords = self.load_places();
+        let mut builder = SuperclusterBuilder::new(coords.len());
+        for coord in coords {
+            builder.add(coord[0], coord[1]);
+        }
+        let _supercluster = builder.finish();
+        _supercluster
+
+    }
+
 }
 
 
@@ -192,6 +205,12 @@ impl GraphWrapper {
             people: HashMap::new(),
             relations: HashMap::new(),
         }
+    }
+
+    pub fn get_clusters(&self, min_lng: f64, min_lat: f64, max_lng: f64, max_lat: f64, zoom: usize) -> usize {
+        let supercluster = self.create_cluster();
+        let clusters = supercluster.get_clusters(min_lng, min_lat, max_lng, max_lat, zoom);
+        clusters.len()
     }
 
     // Create a vertex

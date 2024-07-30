@@ -25,6 +25,7 @@ web-sys = { version = "0.3.66", features = ["console"] }
 # code size when deploying.
 console_error_panic_hook = { version = "0.1.7", optional = true }
 hypergraph = "2.1.2"
+supercluster-rs = "0.1.0"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.34"
