@@ -1,36 +1,110 @@
 use std::collections::HashMap;
 use std::fmt;
 use wasm_bindgen::prelude::*;
+use serde_wasm_bindgen::to_value;
 use serde::{Serialize, Deserialize};
-//use web_sys::js_sys::{Int32Array, Uint32Array};
 
-
-use hypergraph::{Hypergraph, VertexIndex}; //HyperedgeIndex, VertexIndex
+use hypergraph::{Hypergraph, VertexIndex};
 use std::fmt::{Display, Formatter};
 
+use std::cmp::PartialEq;
+use std::hash::{Hash, Hasher};
+use hypergraph::errors::HypergraphError;
+use js_sys::Float64Array;
+
+// Function to convert a Float64Array to Coords
+fn js_array_to_coords(array: &Float64Array) -> Coords {
+    let lon = array.get_index(0);
+    let lat = array.get_index(1);
+    Coords { lon, lat }
+}
+
+// Function to convert Coords to a Float64Array
+fn coords_to_js_array(coords: &Coords) -> Float64Array {
+    let array = Float64Array::new_with_length(2);
+    array.set_index(0, coords.lon);
+    array.set_index(1, coords.lat);
+    array
+}
+
+// Function to convert HypergraphError to JsValue
+fn convert_error_to_js_value(error: HypergraphError<Node, Relation>) -> JsValue {
+    JsValue::from_str(&format!("Error adding vertex: {:?}", error))
+}
+
+
+// Define the Coords struct
 #[wasm_bindgen]
-#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Person {
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct Coords {
+    pub lon: f64,
+    pub lat: f64,
+}
+
+// Implement PartialEq for Coords
+impl PartialEq for Coords {
+    fn eq(&self, other: &Self) -> bool {
+        self.lon.to_bits() == other.lon.to_bits() && self.lat.to_bits() == other.lat.to_bits()
+    }
+}
+
+// Implement Eq for Coords
+impl Eq for Coords {}
+
+// Implement Hash for Coords
+impl Hash for Coords {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.lon.to_bits().hash(state);
+        self.lat.to_bits().hash(state);
+    }
+}
+
+// Define the Node struct
+#[wasm_bindgen]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct Node {
     id: usize,
+    coords: Coords,
+    pub thr_id: i32,
 }
 
-impl Display for Person {
+// Implement PartialEq for Node
+impl PartialEq for Node {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && self.coords == other.coords && self.thr_id == other.thr_id
+    }
+}
+
+// Implement Eq for Node
+impl Eq for Node {}
+
+// Implement Hash for Node
+impl Hash for Node {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+        self.coords.hash(state);
+        self.thr_id.hash(state);
+    }
+}
+
+impl Display for Node {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "Person {}", self.id)
+        write!(f, "Node {} {:?} {}", self.id, self.coords, self.thr_id)
     }
 }
 
 #[wasm_bindgen]
-impl Person {
-    pub fn new(id: usize) -> Person {
-        Person { id }
+impl Node {
+    pub fn new(id: usize, coords: Coords, thr_id: i32) -> Node {
+        Node { id, coords, thr_id }
     }
+
     pub fn id(&self) -> usize {
         self.id
     }
-    // Method to get the display string for the person
+
     pub fn to_string(&self) -> String {
-        format!("Person {}", self.id)
+        format!("Node {}", self.id)
     }
 }
 
@@ -69,49 +143,8 @@ impl Display for Relation {
 
 
 #[wasm_bindgen]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PersonRecord {
-    loc_name: String,
-    value: i32,
-}
-
-#[wasm_bindgen]
-impl PersonRecord {
-    #[wasm_bindgen(getter)]
-    pub fn name(&self) -> String {
-        self.loc_name.clone()
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn value(&self) -> i32 {
-        self.value
-    }
-}
-
-#[wasm_bindgen]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VertexWithRecord {
-    new_node: Person,
-    record: PersonRecord,
-}
-
-#[wasm_bindgen]
-impl VertexWithRecord {
-    #[wasm_bindgen(getter)]
-    pub fn new_node(&self) -> Person {
-        self.new_node.clone()
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn record(&self) -> PersonRecord {
-        self.record.clone()
-    }
-}
-
-
-#[wasm_bindgen]
 pub struct GraphWrapper {
-    graph: Hypergraph<Person, Relation>,
+    graph: Hypergraph<Node, Relation>,
     people: HashMap<usize, (String, i32)>,
     relations: HashMap<usize, (String, usize)>
 }
@@ -128,7 +161,7 @@ impl GraphWrapper {
 impl GraphWrapper {
     #[wasm_bindgen(constructor)]
     pub fn new() -> GraphWrapper {
-        let graph = Hypergraph::<Person, Relation>::new();
+        let graph = Hypergraph::<Node, Relation>::new();
         GraphWrapper {
             graph,
             people: HashMap::new(),
@@ -138,64 +171,46 @@ impl GraphWrapper {
 
     // Create a vertex
     #[wasm_bindgen]
-    pub fn create_vertex(&mut self, id: usize, name: String, value: i32) -> Result<JsValue, JsValue> {
-        // Create a new Person with a placeholder ID (it will be replaced)
-        let temp_person = Person { id };
+    pub fn create_vertex(&mut self, id: usize, coords_array: Float64Array, thr_id: i32) -> Result<u32, JsValue> {
+        // Convert Float64Array to Coords
+        let coords = js_array_to_coords(&coords_array);
 
-        // Add the vertex using the hypergraph crate method and get the assigned ID
+        // Create a new Node with the given id, coordinates, and thread ID
+        let temp_person = Node { id, coords, thr_id };
+
+        // Try to add the vertex to the hypergraph
         match self.graph.add_vertex(temp_person) {
-            Ok(vertex_index) => {
-                // Extract the ID from VertexIndex
-                let id: usize = vertex_index.0;
-                let new_node = Person { id };
-
-                // Insert the record into the people map
-                self.people.insert(id, (name.clone(), value));
-
-                // Retrieve and clone the record tuple
-                let record_tuple = self.people.get(&id).unwrap().clone();
-                let record = PersonRecord {
-                    loc_name: record_tuple.0.clone(),
-                    value: record_tuple.1,
-                };
-
-                // Serialize the VertexWithRecord to JsValue
-                let result = VertexWithRecord {
-                    new_node,
-                    record,
-                };
-
-                serde_wasm_bindgen::to_value(&result).map_err(|e| JsValue::from_str(&e.to_string()))
-            }
-            Err(e) => Err(JsValue::from_str(&e.to_string())),
+            Ok(vertex_index) => Ok(vertex_index.0 as u32), // Convert VertexIndex to u32
+            Err(e) => Err(convert_error_to_js_value(e)),
         }
     }
-
-
-    pub fn graphClear(&mut self) {
-        self.graph.clear();
-    }
-
 
 
     #[wasm_bindgen]
     pub fn get_vertex_weight(&self, vertex_index: u32) -> Result<JsValue, JsValue> {
+        // Convert u32 to VertexIndex if needed
         let vertex_index = VertexIndex(vertex_index as usize);
 
+        // Retrieve the vertex weight from the hypergraph
         match self.graph.get_vertex_weight(vertex_index) {
-            Ok(person) => {
-                let record = self.people.get(&person.id).ok_or_else(|| JsValue::from_str("Record not found"))?;
-                let person_record = PersonRecord {
-                    loc_name: record.0.clone(),
-                    value: record.1,
-                };
-                serde_wasm_bindgen::to_value(&person_record).map_err(|e| JsValue::from_str(&e.to_string()))
-            }
-            Err(e) => Err(JsValue::from_str(&e.to_string())),
+            Ok(weight) => {
+                // Convert weight to JsValue
+                let js_value = to_value(&weight).map_err(|e| JsValue::from_str(&format!("Serialization error: {:?}", e)))?;
+                Ok(js_value)
+            },
+            Err(e) => Err(JsValue::from_str(&format!("Error retrieving vertex: {:?}", e))),
         }
     }
 
+    #[wasm_bindgen]
+    pub fn graph_clear(&mut self) -> Result<(), JsValue> {
+        // Clear the hypergraph
+        // Example: Assuming self.graph has a method `clear` or similar
+        self.graph.clear(); // Replace with the actual method or logic to clear your hypergraph
 
+        // Return Ok() to indicate success
+        Ok(())
+    }
 
 
     // pub fn to_string(&self) -> String {

@@ -2,7 +2,7 @@ mod graph;
 // mod utils;
 // mod algorithms;
 
-use gloo_console::log;
+//use gloo_console::log;
 //use utils::set_panic_hook;
 use wasm_bindgen::prelude::*;
 
