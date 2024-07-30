@@ -11,7 +11,8 @@ use std::cmp::PartialEq;
 use std::hash::{Hash, Hasher};
 use hypergraph::errors::HypergraphError;
 use js_sys::{Array, Float64Array};
-use supercluster_rs::{Supercluster, SuperclusterBuilder};
+use crate::supercluster::SuperclusterWrapper;
+use gloo_console::log;
 
 // Function to convert a Float64Array to Coords
 fn js_array_to_coords(array: &Float64Array) -> Coords {
@@ -67,6 +68,7 @@ pub struct Node {
     id: usize,
     coords: Coords,
     pub thr_id: Option<i32>,  // Use Option<i32> to handle undefined values
+    pub is_node: bool, // New field to indicate if it's a node or just a set of coordinates
 }
 
 // Implement PartialEq for Node
@@ -106,8 +108,8 @@ impl fmt::Display for Node {
 
 #[wasm_bindgen]
 impl Node {
-    pub fn new(id: usize, coords: Coords, thr_id: Option<i32>) -> Node {
-        Node { id, coords, thr_id }
+    pub fn new(id: usize, coords: Coords, thr_id: Option<i32>, is_node: bool) -> Node {
+        Node { id, coords, thr_id, is_node }
     }
 
     pub fn id(&self) -> usize {
@@ -156,7 +158,7 @@ impl Display for Relation {
 #[wasm_bindgen]
 pub struct GraphWrapper {
     graph: Hypergraph<Node, Relation>,
-    people: HashMap<usize, (String, i32)>,
+
     relations: HashMap<usize, (String, usize)>
 }
 
@@ -170,7 +172,13 @@ impl GraphWrapper {
             let vertex_index = VertexIndex(i);
             match self.graph.get_vertex_weight(vertex_index) {
                 Ok(node) => {
-                    coords.push(vec![node.coords.lon, node.coords.lat]);
+                    if node.is_node {
+                        // Only push coordinates if `is_node` is true
+                        coords.push(vec![node.coords.lon, node.coords.lat]); // Assuming coords are (lon, lat)
+                    } else {
+                        // Optionally push an empty vector or handle non-node cases
+                        // coords.push(vec![]);
+                    }
                 },
                 Err(_) => {
                     coords.push(vec![]); // Handle vertex retrieval failure gracefully
@@ -181,16 +189,6 @@ impl GraphWrapper {
         coords
     }
 
-    pub fn create_cluster(&self) -> Supercluster {
-        let coords = self.load_places();
-        let mut builder = SuperclusterBuilder::new(coords.len());
-        for coord in coords {
-            builder.add(coord[0], coord[1]);
-        }
-        let _supercluster = builder.finish();
-        _supercluster
-
-    }
 
 }
 
@@ -200,30 +198,30 @@ impl GraphWrapper {
     #[wasm_bindgen(constructor)]
     pub fn new() -> GraphWrapper {
         let graph = Hypergraph::<Node, Relation>::new();
+
         GraphWrapper {
             graph,
-            people: HashMap::new(),
             relations: HashMap::new(),
         }
     }
 
-    pub fn get_clusters(&self, min_lng: f64, min_lat: f64, max_lng: f64, max_lat: f64, zoom: usize) -> usize {
-        let supercluster = self.create_cluster();
-        let clusters = supercluster.get_clusters(min_lng, min_lat, max_lng, max_lat, zoom);
-        clusters.len()
+    #[wasm_bindgen]
+    pub fn create_supercluster(&self) -> SuperclusterWrapper {
+        log!("creating supercluster in rust");
+        SuperclusterWrapper::new(self)
     }
 
     // Create a vertex
     #[wasm_bindgen]
-    pub fn create_vertex(&mut self, id: usize, coords_array: Float64Array, thr_id: Option<i32>) -> Result<u32, JsValue> {
+    pub fn create_vertex(&mut self, id: usize, coords_array: Float64Array, thr_id: Option<i32>, is_node: bool) -> Result<u32, JsValue> {
         // Convert Float64Array to Coords
         let coords = js_array_to_coords(&coords_array);
 
         // Create a new Node with the given id, coordinates, and thread ID
-        let temp_person = Node { id, coords, thr_id };
+        let new_node = Node { id, coords, thr_id, is_node };
 
         // Try to add the vertex to the hypergraph
-        match self.graph.add_vertex(temp_person) {
+        match self.graph.add_vertex(new_node) {
             Ok(vertex_index) => Ok(vertex_index.0 as u32), // Convert VertexIndex to u32
             Err(e) => Err(convert_error_to_js_value(e)),
         }
@@ -278,143 +276,4 @@ impl GraphWrapper {
     }
 
 
-    // pub fn to_string(&self) -> String {
-    //     let mut text = String::new();
-    //
-    //     for node in self.graph.node_indices() {
-    //         let node_data = self.graph.node_weight(node).unwrap();
-    //         text.push_str(&format!("Node {}: {:?}\n", node.index(), node_data));
-    //     }
-    //
-    //     for edge in self.graph.edge_indices() {
-    //         let (source, destination) = self.graph.edge_endpoints(edge).unwrap();
-    //         text.push_str(&format!("Edge {} -> {}\n", source.index(), destination.index()));
-    //     }
-    //
-    //     text
-    // }
-
-    // pub fn len(&self) -> u32 {
-    //     self.graph.node_count() as u32
-    // }
-
-    // Return MyVertexData instead of usize
-
-
-    // pub fn neighbors(&self, node_id: usize) -> Uint32Array {
-    //     let node_index = NodeIndex::<u32>::new(node_id);
-    //
-    //     let node_indexes: Vec<u32> = self
-    //         ._neighbors(node_index)
-    //         .map(|node| node.index() as u32)
-    //         .collect();
-    //
-    //     Uint32Array::from(&node_indexes[..])
-    // }
-
-    // pub fn delete_vertex(&mut self, node_id: usize) {
-    //     let node_index = NodeIndex::<u32>::new(node_id);
-    //     self.graph.remove_node(node_index);
-    // }
-    //
-    // pub fn delete_edge(&mut self, edge_id: usize) {
-    //     let edge_index = petgraph::graph::EdgeIndex::<u32>::new(edge_id);
-    //     self.graph.remove_edge(edge_index);
-    // }
-    //
-    // pub fn edge(
-    //     &self,
-    //     first_node_id: usize,
-    //     second_node_id: usize,
-    // ) -> Result<Option<u32>, String> {
-    //     let first_node = NodeIndex::<u32>::new(first_node_id);
-    //     let second_node = NodeIndex::<u32>::new(second_node_id);
-    //
-    //     let first_to_second = self
-    //         .graph
-    //         .edges_connecting(first_node, second_node)
-    //         .map(|edge| edge.id().index() as u32);
-    //
-    //     let second_to_first = self
-    //         .graph
-    //         .edges_connecting(second_node, first_node)
-    //         .map(|edge| edge.id().index() as u32);
-    //
-    //     let all_edges: Vec<u32> = first_to_second.chain(second_to_first).collect();
-    //
-    //     if all_edges.len() > 1 {
-    //         return Err(format!(
-    //             "An error was logged because there exists more than one edge between {first_node_id} and {second_node_id}"
-    //         ));
-    //     }
-    //
-    //     if all_edges.is_empty() {
-    //         return Ok(None);
-    //     }
-    //
-    //     Ok(Some(all_edges[0]))
-    // }
-
-    // pub fn edge_directed(
-    //     &self,
-    //     first_node_id: usize,
-    //     second_node_id: usize,
-    // ) -> Result<Option<u32>, String> {
-    //     let first_node = NodeIndex::<u32>::new(first_node_id);
-    //     let second_node = NodeIndex::<u32>::new(second_node_id);
-    //
-    //     let edges: Vec<u32> = self
-    //         .graph
-    //         .edges_connecting(first_node, second_node)
-    //         .map(|edge| edge.id().index() as u32)
-    //         .collect();
-    //
-    //     if edges.len() > 1 {
-    //         return Err(format!(
-    //             "An error was logged because there exists more than one edge between {first_node_id} and {second_node_id}"
-    //         ));
-    //     }
-    //
-    //     if edges.is_empty() {
-    //         return Ok(None);
-    //     }
-    //
-    //     Ok(Some(edges[0]))
-    // }
-    //
-    // pub fn adjacent_edges(&self, node_id: usize) -> Int32Array {
-    //     let node_index = NodeIndex::<u32>::new(node_id);
-    //
-    //     let outgoing_edges = self
-    //         .graph
-    //         .edges_directed(node_index, Incoming)
-    //         .map(|edge| edge.id().index() as i32);
-    //
-    //     let edge_indexes = self
-    //         .graph
-    //         .edges_directed(node_index, Outgoing)
-    //         .map(|edge| edge.id().index() as i32);
-    //
-    //     let all_edges: Vec<i32> = outgoing_edges.chain(edge_indexes).collect();
-    //
-    //     Int32Array::from(&all_edges[..])
-    // }
-    //
-    // pub fn create_edge(
-    //     &mut self,
-    //     source_node_id: usize,
-    //     destination_node_id: usize,
-    //     weight: Option<u32>,
-    // ) -> Result<usize, String> {
-    //     let source_node_index = NodeIndex::<u32>::new(source_node_id);
-    //     let destination_node_index = NodeIndex::<u32>::new(destination_node_id);
-    //
-    //     let new_edge = self.graph.update_edge(
-    //         source_node_index,
-    //         destination_node_index,
-    //         weight.unwrap_or(1),
-    //     );
-    //
-    //     Ok(new_edge.index())
-    // }
 }
