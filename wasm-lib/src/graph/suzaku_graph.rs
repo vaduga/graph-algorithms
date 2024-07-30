@@ -206,9 +206,9 @@ impl GraphWrapper {
     }
 
     #[wasm_bindgen]
-    pub fn create_supercluster(&self) -> SuperclusterWrapper {
+    pub fn create_supercluster(&self, max_zoom: usize, radius: f64) -> SuperclusterWrapper {
         log!("creating supercluster in rust");
-        SuperclusterWrapper::new(self)
+        SuperclusterWrapper::new(self, max_zoom, radius)
     }
 
     // Create a vertex

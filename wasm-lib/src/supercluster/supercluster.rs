@@ -3,7 +3,7 @@
 use wasm_bindgen::prelude::*;
 use serde::Serialize;
 use serde_wasm_bindgen::to_value;
-use supercluster_rs::{Supercluster, ClusterInfo as ExternalClusterInfo, ClusterId, SuperclusterBuilder};
+use supercluster_rs::{Supercluster, ClusterInfo as ExternalClusterInfo, ClusterId, SuperclusterBuilder, SuperclusterOptions};
 use crate::graph::suzaku_graph::GraphWrapper;
 
 // Assuming you already have this defined
@@ -36,9 +36,14 @@ pub struct SuperclusterWrapper {
 #[wasm_bindgen]
 impl SuperclusterWrapper {
     #[wasm_bindgen(constructor)]
-    pub fn new(graph: &GraphWrapper) -> SuperclusterWrapper {
+    pub fn new(graph: &GraphWrapper, max_zoom: usize, radius: f64) -> SuperclusterWrapper {
         let coords = graph.load_places();
-        let mut builder = SuperclusterBuilder::new(coords.len());
+        let options = SuperclusterOptions {
+            max_zoom,
+            radius,
+            ..Default::default()
+        };
+        let mut builder = SuperclusterBuilder::new_with_options(coords.len(), options);
         for coord in coords {
             builder.add(coord[0], coord[1]);
         }
