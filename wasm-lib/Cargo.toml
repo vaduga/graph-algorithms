@@ -25,7 +25,9 @@ web-sys = { version = "0.3.66", features = ["console"] }
 # code size when deploying.
 console_error_panic_hook = { version = "0.1.7", optional = true }
 hypergraph = "2.1.2"
-supercluster-rs = "0.1.0"
+supercluster-rs = { path = "src/supercluster-rs" }
+geo = "0.28.0"
+geo-types = "0.7.13"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.34"
