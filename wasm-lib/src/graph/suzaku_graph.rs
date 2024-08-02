@@ -13,6 +13,7 @@ use hypergraph::errors::HypergraphError;
 use js_sys::{Array, Float64Array};
 use crate::supercluster::SuperclusterWrapper;
 use gloo_console::log;
+use hypergraph::iterator::HypergraphIterator;
 
 // Function to convert a Float64Array to Coords
 fn js_array_to_coords(array: &Float64Array) -> Coords {
@@ -164,7 +165,8 @@ pub struct GraphWrapper {
 
 // Internal function to load vertex coordinates
 impl GraphWrapper {
-    pub fn load_places(&self) -> Vec<Vec<f64>> {
+    pub fn load_places(&self) -> Vec<(f64, f64)> {
+
         let count = self.graph.count_vertices();
         let mut coords = Vec::with_capacity(count);
 
@@ -174,20 +176,49 @@ impl GraphWrapper {
                 Ok(node) => {
                     if node.is_node {
                         // Only push coordinates if `is_node` is true
-                        coords.push(vec![node.coords.lon, node.coords.lat]); // Assuming coords are (lon, lat)
+                        coords.push((node.coords.lon, node.coords.lat)); // Assuming coords are (lon, lat)
                     } else {
                         // Optionally push an empty vector or handle non-node cases
                         // coords.push(vec![]);
                     }
                 },
                 Err(_) => {
-                    coords.push(vec![]); // Handle vertex retrieval failure gracefully
+                    //coords.push((vec![])); // Handle vertex retrieval failure gracefully
                 }
             }
         }
 
         coords
     }
+
+
+    pub fn load_threshold_ids(&self) -> Vec<usize> {
+
+        let count = self.graph.count_vertices();
+        let mut thr_ids = Vec::with_capacity(count);
+
+        for i in 0..count {
+            let vertex_index = VertexIndex(i);
+            match self.graph.get_vertex_weight(vertex_index) {
+                Ok(node) => {
+                    if node.is_node {
+                        if let Some(thr_id) = node.thr_id {
+                            // Only push thr_id if `is_node` is true and thr_id is Some
+                            thr_ids.push(thr_id as usize);
+                        }
+                    } else {
+
+                    }
+                },
+                Err(_) => {
+                    //coords.push((vec![])); // Handle vertex retrieval failure gracefully
+                }
+            }
+        }
+
+        thr_ids
+    }
+
 
 
 }
@@ -251,11 +282,10 @@ impl GraphWrapper {
 
         // Convert Vec<Vec<f64>> to js_sys::Array
         let js_array = Array::new();
-        for coords in coords_vec {
+        for (x, y) in coords_vec {
             let inner_array = Array::new();
-            for value in coords {
-                inner_array.push(&JsValue::from_f64(value));
-            }
+            inner_array.push(&JsValue::from_f64(x));
+            inner_array.push(&JsValue::from_f64(y));
             js_array.push(&inner_array.into());
         }
 
