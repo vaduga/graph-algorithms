@@ -6,7 +6,7 @@ use serde::Serialize;
 use serde_wasm_bindgen::to_value;
 use supercluster_rs::{Supercluster, ClusterInfo, ClusterId, SuperclusterBuilder, SuperclusterOptions};
 use crate::graph::suzaku_graph::GraphWrapper;
-use geo::{Centroid, ConvexHull, CoordsIter};
+use geo::{ConvexHull, CoordsIter};
 use gloo_console::log;
 use geo_types::{MultiPoint, Point, Polygon};
 use js_sys::Array;
@@ -14,8 +14,10 @@ use supercluster_rs::statistics::{Accumulator, Statistic, Statistics, ThresholdC
 
 #[derive(Serialize)]
 pub struct GeometryResult {
-    pub centroid: CenterCoordinates,
+    //pub centroid: CenterCoordinates,   /// cluster coordiantes is the center actually
     pub convex_hull: Vec<Vec<f64>>,
+    pub children_ids: Vec<usize>,
+    pub exp_zoom: Result<usize, String>,
 }
 
 
@@ -68,28 +70,25 @@ impl SuperclusterWrapper {
         let coords = graph.load_places();
         let threshold_ids = graph.load_threshold_ids(); // Add this method to load threshold IDs
 
-        log!(&format!("thresholds_ids {:?}", threshold_ids.clone()));
+        //log!(&format!("thresholds_ids {:?}", threshold_ids.clone()));
         let options = SuperclusterOptions {
             max_zoom,
             radius,
             ..Default::default()
         };
-        let mut builder = SuperclusterBuilder::new_with_options(coords.len(), options, threshold_ids);
+        let mut builder = SuperclusterBuilder::new_with_options(coords.len(), options);
         let coords_clone = coords.clone();
         for coord in coords {
             builder.add(coord.0, coord.1);
         }
 
-        // Create instances of accumulators
-        let mut threshold_counter = ThresholdCounter::new();
-
-
         // Add accumulators to a HashMap
-        let mut accumulators: HashMap<String, &dyn Accumulator> = HashMap::new();
-        accumulators.insert("threshold_counter".to_string(), &mut threshold_counter);
+        let mut accumulators: HashMap<String, Box<dyn Accumulator>> = HashMap::new();
+        accumulators.insert("threshold_counter".to_string(), Box::new(ThresholdCounter::new()));
+
 
         // Pass the accumulators to the finish method
-        let supercluster = builder.finish(&accumulators);
+        let supercluster = builder.finish(accumulators, threshold_ids);
 
         Self { supercluster, points: coords_clone }
     }
@@ -107,8 +106,7 @@ impl SuperclusterWrapper {
 
 
 
-    #[wasm_bindgen]
-    pub fn get_cluster_expansion_zoom(&self, cluster_id: usize, zoom: usize, length: usize) -> Result<usize, JsValue> {
+    pub fn get_cluster_expansion_zoom(&self, cluster_id: usize) -> Result<usize, JsValue> {
         // Convert usize to ClusterId
         let cl_id = ClusterId::new_source_id(cluster_id); //, zoom, length);
 
@@ -121,60 +119,43 @@ impl SuperclusterWrapper {
     }
 
     #[wasm_bindgen]
-    pub fn get_center_n_convex(&self, cluster_id: usize, zoom: usize) -> JsValue {
-        // Convert usize to ClusterId
-
-        let cl_id = ClusterId::new_source_id(cluster_id); //, zoom, self.points.len());
+    pub fn get_cluster_info(&self, cluster_id: usize, zoom: usize) -> JsValue {
+        let cl_id = ClusterId::new_source_id(cluster_id);
 
         log!("cl_id", cl_id.as_usize(), self.points.len());
-        let leaves_js = self.get_custom_leaves(cl_id.as_usize());
 
-        // Fetch leaves with a default limit of usize::MAX (infinity) and offset of 0
         match self.supercluster.get_leaves(cl_id, Some(usize::MAX), Some(0)) {
             Ok(leaves) => {
-                // Convert ClusterInfo to geo::Point
                 let points: Vec<Point<f64>> = leaves.into_iter()
                     .map(|info| Point::new(info.x(), info.y()))
                     .collect();
 
-                // Create MultiPoint from the points
                 let multi_point = MultiPoint::from(points.clone());
 
-                // Compute the convex hull
                 let convex_hull: Polygon<f64> = multi_point.convex_hull();
                 let hull_coords: Vec<Vec<f64>> = convex_hull.exterior().coords_iter()
                     .map(|coord| vec![coord.x, coord.y])
                     .collect();
 
-
-                // Log the convex hull coordinates for debugging
                 log!(&format!("Convex Hull Coordinates: {:?}", hull_coords));
 
-
-                // Compute the centroid
-                let centroid = multi_point.centroid().unwrap_or(Point::new(0.0, 0.0));
-                let center_coords = CenterCoordinates {
-                    center_x: centroid.x(),
-                    center_y: centroid.y(),
-                };
-
-
-
-                // Create the result struct
                 let result = GeometryResult {
-                    centroid: center_coords,
+                    children_ids: self.get_children_cluster_ids(cluster_id, zoom),
                     convex_hull: hull_coords,
+                    exp_zoom: match self.get_cluster_expansion_zoom(cluster_id) {
+                        Ok(zoom) => Ok(zoom),
+                        Err(e) => Err(format!("Error getting zoom level: {}", e.as_string().unwrap_or_else(|| "Unknown error".to_string()))),
+                    },
                 };
 
-                // Convert GeometryResult to JsValue
                 to_value(&result).unwrap()
             }
             Err(e) => JsValue::from_str(&e.to_string()),
         }
     }
 
-    #[wasm_bindgen]
-    pub fn get_children_cluster_ids(&self, cluster_id: usize, zoom: usize) -> JsValue {
+
+    pub fn get_children_cluster_ids(&self, cluster_id: usize, zoom: usize) -> Vec<usize> {
         // Convert usize to ClusterId
         let cl_id = ClusterId::new_source_id(cluster_id);
 
@@ -182,28 +163,22 @@ impl SuperclusterWrapper {
         let mut cluster_ids: Vec<usize> = Vec::new();
 
         // Recursive function to collect cluster IDs
-        fn collect_cluster_ids(wrapper: &SuperclusterWrapper, cl_id: ClusterId, cluster_ids: &mut Vec<usize>) {
-            if let Ok(children) = wrapper.supercluster.get_children(cl_id) {
+        fn collect_cluster_ids(supercluster: &Supercluster, cl_id: ClusterId, cluster_ids: &mut Vec<usize>) {
+            if let Ok(children) = supercluster.get_children(cl_id) {
                 for info in children {
                     if info.is_cluster() {
                         cluster_ids.push(info.id().as_usize());
                         // Recursively collect children of this cluster
-                        collect_cluster_ids(wrapper, ClusterId::new_source_id(info.id().as_usize()), cluster_ids);
+                        collect_cluster_ids(supercluster, ClusterId::new_source_id(info.id().as_usize()), cluster_ids);
                     }
                 }
             }
         }
 
         // Start collecting cluster IDs from the initial cluster
-        collect_cluster_ids(self, cl_id, &mut cluster_ids);
+        collect_cluster_ids(&self.supercluster, cl_id, &mut cluster_ids);
 
-        // Convert Vec<usize> to js_sys::Array
-        let js_array = Array::new();
-        for id in cluster_ids {
-            js_array.push(&JsValue::from_f64(id as f64));
-        }
-
-        js_array.into()
+        cluster_ids
     }
 
     #[wasm_bindgen]
